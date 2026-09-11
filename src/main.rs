@@ -194,18 +194,19 @@ fn apply_pump(
     }
 
     let is_on = ent.state == "on";
-    let key = format!("{entity_id}:{want_on}");
+    let key = entity_id.clone();
+    let want = if want_on { "on" } else { "off" };
 
     if is_on == want_on {
         throttle.clear(&key);
         return;
     }
 
-    if throttle.attempted(&key) {
+    if throttle.attempted(&key, want) {
         eprintln!("    {entity_id} did not apply the previous command; retrying");
     }
-    if !throttle.allow(&key) {
-        if let Some(d) = throttle.retry_in(&key) {
+    if !throttle.allow(&key, want) {
+        if let Some(d) = throttle.retry_in(&key, want) {
             println!(
                 "    {entity_id} write throttled, retrying in {}s",
                 d.as_secs()
@@ -378,21 +379,21 @@ fn ensure_hvac_mode(
     desired: &str,
     throttle: &mut WriteThrottle,
 ) -> bool {
-    let key = format!("{entity_id}:hvac_mode:{desired}");
+    let key = format!("{entity_id}:hvac_mode");
 
     if actual == desired {
         throttle.clear(&key);
         return true;
     }
 
-    if throttle.attempted(&key) {
+    if throttle.attempted(&key, desired) {
         eprintln!(
             "  warning: {entity_id} is still in mode `{actual}` after an earlier \
              set_hvac_mode to `{desired}`; retrying"
         );
     }
-    if !throttle.allow(&key) {
-        if let Some(d) = throttle.retry_in(&key) {
+    if !throttle.allow(&key, desired) {
+        if let Some(d) = throttle.retry_in(&key, desired) {
             println!("  set_hvac_mode throttled, retrying in {}s", d.as_secs());
         }
         return false;
@@ -416,22 +417,23 @@ fn ensure_setpoint(
     desired: f64,
     throttle: &mut WriteThrottle,
 ) {
-    let key = format!("{entity_id}:{field}:{desired:.1}");
+    let key = format!("{entity_id}:{field}");
+    let want = format!("{desired:.1}");
 
     if actual.is_some_and(|a| (a - desired).abs() <= TEMP_EPSILON) {
         throttle.clear(&key);
         return;
     }
 
-    if throttle.attempted(&key) {
+    if throttle.attempted(&key, &want) {
         eprintln!(
             "  warning: {entity_id} {field} is still {} after an earlier \
              set_temperature to {desired:.1}°C; retrying",
             fmt_temp(actual)
         );
     }
-    if !throttle.allow(&key) {
-        if let Some(d) = throttle.retry_in(&key) {
+    if !throttle.allow(&key, &want) {
+        if let Some(d) = throttle.retry_in(&key, &want) {
             println!("  set_temperature throttled, retrying in {}s", d.as_secs());
         }
         return;
@@ -472,21 +474,21 @@ fn ensure_preset_mode(
     }
 
     let actual = ent.attr_str("preset_mode").unwrap_or("unknown");
-    let key = format!("{entity_id}:preset_mode:{desired}");
+    let key = format!("{entity_id}:preset_mode");
 
     if actual == desired {
         throttle.clear(&key);
         return;
     }
 
-    if throttle.attempted(&key) {
+    if throttle.attempted(&key, desired) {
         eprintln!(
             "  warning: {entity_id} preset is still `{actual}` after an earlier \
              set_preset_mode to `{desired}`; retrying"
         );
     }
-    if !throttle.allow(&key) {
-        if let Some(d) = throttle.retry_in(&key) {
+    if !throttle.allow(&key, desired) {
+        if let Some(d) = throttle.retry_in(&key, desired) {
             println!("  set_preset_mode throttled, retrying in {}s", d.as_secs());
         }
         return;

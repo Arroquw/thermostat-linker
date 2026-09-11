@@ -167,45 +167,104 @@ impl HomeAssistant {
     }
 }
 
-/// Rate limiter for writes that Home Assistant accepted but the device did not
-/// apply.
+/// Rate limiter for commands a device keeps refusing.
+///
+/// Re-asking for the same value is a retry and is rate limited
 #[derive(Default)]
 pub struct WriteThrottle {
-    last_attempt: HashMap<String, Instant>,
+    pending: HashMap<String, Attempt>,
     min_interval: Duration,
+}
+
+struct Attempt {
+    desired: String,
+    at: Instant,
 }
 
 impl WriteThrottle {
     pub fn new(min_interval_secs: u64) -> Self {
         Self {
-            last_attempt: HashMap::new(),
+            pending: HashMap::new(),
             min_interval: Duration::from_secs(min_interval_secs),
         }
     }
 
-    /// Returns true if a write keyed by `key` may be attempted now.
-    pub fn allow(&mut self, key: &str) -> bool {
-        match self.last_attempt.get(key) {
-            Some(t) if t.elapsed() < self.min_interval => false,
+    pub fn allow(&mut self, key: &str, desired: &str) -> bool {
+        match self.pending.get(key) {
+            Some(a) if a.desired == desired && a.at.elapsed() < self.min_interval => false,
             _ => {
-                self.last_attempt.insert(key.to_string(), Instant::now());
+                self.pending.insert(
+                    key.to_string(),
+                    Attempt {
+                        desired: desired.to_string(),
+                        at: Instant::now(),
+                    },
+                );
                 true
             }
         }
     }
 
     pub fn clear(&mut self, key: &str) {
-        self.last_attempt.remove(key);
+        self.pending.remove(key);
     }
 
-    pub fn retry_in(&self, key: &str) -> Option<Duration> {
-        let t = self.last_attempt.get(key)?;
-        self.min_interval.checked_sub(t.elapsed())
+    pub fn attempted(&self, key: &str, desired: &str) -> bool {
+        self.pending.get(key).is_some_and(|a| a.desired == desired)
+    }
+
+    pub fn retry_in(&self, key: &str, desired: &str) -> Option<Duration> {
+        let a = self.pending.get(key)?;
+        if a.desired != desired {
+            return None;
+        }
+        self.min_interval.checked_sub(a.at.elapsed())
     }
 }
 
-impl WriteThrottle {
-    pub fn attempted(&self, key: &str) -> bool {
-        self.last_attempt.contains_key(key)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_same_unsatisfied_command_is_rate_limited() {
+        let mut t = WriteThrottle::new(300);
+        assert!(t.allow("climate.x:hvac_mode", "heat"));
+        assert!(!t.allow("climate.x:hvac_mode", "heat"));
+    }
+
+    #[test]
+    fn a_different_target_is_never_blocked_by_an_earlier_one() {
+        let mut t = WriteThrottle::new(300);
+        assert!(t.allow("switch.pump", "on"));
+        assert!(t.allow("switch.pump", "off"));
+        assert!(t.allow("switch.pump", "on"));
+    }
+
+    #[test]
+    fn an_idle_setpoint_is_not_blocked_by_the_previous_idle_setpoint() {
+        let mut t = WriteThrottle::new(300);
+        assert!(t.allow("climate.lyric:temperature", "21.5"));
+        assert!(t.allow("climate.lyric:temperature", "22.0"));
+        assert!(t.allow("climate.lyric:temperature", "21.5"));
+        assert!(!t.attempted("climate.lyric:temperature", "22.0"));
+    }
+
+    #[test]
+    fn reaching_the_desired_state_resets_the_throttle() {
+        let mut t = WriteThrottle::new(300);
+        assert!(t.allow("climate.x:hvac_mode", "heat"));
+        assert!(!t.allow("climate.x:hvac_mode", "heat"));
+        t.clear("climate.x:hvac_mode");
+        assert!(t.allow("climate.x:hvac_mode", "heat"));
+    }
+
+    #[test]
+    fn attempted_reports_only_the_same_pending_command() {
+        let mut t = WriteThrottle::new(300);
+        t.allow("climate.x:hvac_mode", "heat");
+        assert!(t.attempted("climate.x:hvac_mode", "heat"));
+        assert!(!t.attempted("climate.x:hvac_mode", "off"));
+        assert!(t.retry_in("climate.x:hvac_mode", "off").is_none());
     }
 }
