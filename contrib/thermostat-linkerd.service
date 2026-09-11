@@ -1,0 +1,39 @@
+# systemd unit for thermostat-linkerd. See README.md for full setup steps.
+
+[Unit]
+Description=Link floor heating zones to a heat pump thermostat via Home Assistant
+Documentation=https://github.com/Arroquw/thermostat-linker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=thermostat
+Group=thermostat
+
+# The token is passed in the environment; the config file refers to it with
+# token_env = "HA_TOKEN"
+EnvironmentFile=/etc/thermostat-linker/env
+
+ExecStart=/usr/local/bin/thermostat-linkerd --config /etc/thermostat-linker/Config.toml
+
+Restart=on-failure
+RestartSec=30s
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,75 @@
+# thermostat-linkerd configuration
+#
+# Default location: ~/.config/thermostat-linker/Config.toml
+# Override with:    thermostat-linkerd --config /path/to/Config.toml
+
+# The main thermostat that controls the heat pump (the Honeywell Lyric). This is
+# the one switched between `heat` and `off`. May be a pattern; see [zones].
+main = "climate.living_room_heat_pump"
+
+# While any zone calls for heat, the main thermostat is set to its own measured
+# temperature plus this, which keeps the target above the room and so keeps the
+# heat pump running.
+temp_increment = 0.5
+
+# Preset to hold the main thermostat in. A Lyric that still has a schedule
+# treats every API write as a `TemporaryHold` and resumes its schedule at the
+# next scheduled change -- which looks exactly like the thermostat ignoring the
+# command. `PermanentHold` stops that.
+preset_mode = "PermanentHold"
+
+# Symmetric margin around each zone thermostat's setpoint, in degrees.
+# A zone starts calling below (setpoint - hysteresis) and stops above
+# (setpoint + hysteresis); in between it keeps its previous decision.
+hysteresis = 0.2
+
+# Seconds between polls of Home Assistant.
+poll_interval = 30
+
+# Never re-send the same unsatisfied command to an entity more often than this
+# many seconds. Protects the Honeywell cloud API from being limited when a
+# thermostat refuses a command.
+min_write_interval = 300
+
+# Log what would happen without calling any Home Assistant service.
+dry_run = false
+
+# Floor heating zones. Each key is a pump; each value is the list of zone
+# thermostats it serves. A pump is switched on while any of its thermostats
+# calls for heat.
+#
+# Entity ids may be patterns, in which `*` matches any run of characters. A
+# pattern is matched case-insensitively against both the entity id and the
+# friendly name, which keeps the config working when an integration reload
+# renames entities. A pump pattern must resolve to exactly one entity or it is
+# skipped with an error; a thermostat pattern may match several.
+#
+# A key without a dot is taken as `switch.<key>`.
+[zones]
+    "switch.*downstairs*pump*" = [
+        "climate.kitchen*",
+        "climate.hallway*",
+    ]
+    "switch.*upstairs*pump*" = [
+        "climate.bedroom*",
+        "climate.bathroom*",
+    ]
+
+[home_assistant]
+    baselink = "http://homeassistant.local:8123"
+
+    # The long-lived access token is resolved from the first source below that
+    # yields a value, in this order. Listing several is fine and lets the same
+    # config work under systemd and by hand.
+
+    # 1. An environment variable (best for systemd, see contrib/)
+    token_env = "HA_TOKEN"
+
+    # 2. A command whose stdout is the token (pass, gopass, secret-tool, ...)
+    # token_command = "pass show home-assistant/token"
+
+    # 3. A file containing the token. Must be mode 0600.
+    # token_file = "~/.config/thermostat-linker/token"
+
+    # 4. Inline. Discouraged: warns on startup and is easy to commit by accident.
+    # token = "wThbfYzxLn..."
